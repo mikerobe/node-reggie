@@ -19,7 +19,8 @@ var restify = require('restify')
 var defaults = {
     d : path.join(process.cwd(), 'data'),
     p : 8080,
-    h: '0.0.0.0'
+    h: '0.0.0.0',
+    s: ''
   },
   argv = optimist
     .usage('Reggie wants to serve your packages!\nUsage: $0')
@@ -29,10 +30,16 @@ var defaults = {
     .alias('p', 'port')
     .alias('h', 'host')
     .alias('u', 'url')
+    .alias('c', 'cert')
+    .alias('k', 'key')
+    .alias('s', 'security')
     .describe('d', 'Directory to store Reggie\'s data')
     .describe('p', 'Reggie\'s a good listener. What port should I listen on?')
     .describe('h', 'Which host should Reggie listen on?')
     .describe('u', 'URL where `npm` can access registry (usually http://{hostname}:{port}/)')
+    .describe('s', 'What (long) prefix should be in the first part of the path (for security)?')
+    .describe('c', 'Path to the SSL certificate')
+    .describe('k', 'Path to the SSL key')
     .argv;
 
 if (argv.help) {
@@ -40,6 +47,22 @@ if (argv.help) {
   process.exit(0);
 }
 
+// ----------------------------------------------------------------------------
+// SSL & security setup
+// ----------------------------------------------------------------------------
+
+var prefix = argv.s ? "/" + argv.s : '', cert, key;
+
+// Validate SSL
+if (!!argv.c !== !!argv.k) {
+  console.error("To use SSL, both the SSL key and certificate must be passed (options c and k).")
+  process.exit(1);
+}
+
+if (argv.c) {
+  key = fs.readFileSync(argv.k);
+  cert = fs.readFileSync(argv.c);
+}
 
 // ----------------------------------------------------------------------------
 // data initialization
@@ -47,7 +70,7 @@ if (argv.help) {
 
 var config = {
   dataDirectory: argv.data,
-  registryUrl: normalizeUrl(argv.url || 'http://' + argv.h + ':' + argv.p + '/')
+  registryUrl: normalizeUrl(argv.url || (cert ? 'https://' : 'http://') + argv.h + ':' + argv.p + prefix)
 }
 
 var Data = require('./lib/data');
@@ -71,15 +94,19 @@ function normalizeUrl(url) {
 // server wireup
 // ----------------------------------------------------------------------------
 
-var server = restify.createServer();
+var server = !cert ? restify.createServer() : restify.createServer({
+    certificate: cert,
+    key: key
+  });
+  
 
 server.use(restify.bodyParser());
 
-server.get('/', function (req, res) {
+server.get(prefix + '/', function (req, res) {
   res.send('Reggie says hi')
 });
 
-server.put('/package/:name/:version', function (req, res, next) {
+server.put(prefix + '/package/:name/:version', function (req, res, next) {
   var name = req.params.name;
   var version = req.params.version;
   var rand = Math.floor(Math.random()*4294967296).toString(36);
@@ -105,7 +132,7 @@ server.put('/package/:name/:version', function (req, res, next) {
   });
 });
 
-server.del('/package/:name/:version', function (req, res, next) {
+server.del(prefix + '/package/:name/:version', function (req, res, next) {
   var name = req.params.name;
   var version = req.params.version;
 
@@ -118,12 +145,12 @@ server.del('/package/:name/:version', function (req, res, next) {
   });
 });
 
-server.get('/versions/:name', function (req, res) {
+server.get(prefix + '/versions/:name', function (req, res) {
   var name = req.params.name;
   res.send(data.whichVersions(name));
 });
 
-server.get('/package/:name/:range', function (req, res, next) {
+server.get(prefix + '/package/:name/:range', function (req, res, next) {
   var name = req.params.name;
   var range = req.params.range;
   if (range === 'latest') 
@@ -131,11 +158,11 @@ server.get('/package/:name/:range', function (req, res, next) {
   returnPackageByRange(name, range, res);
 });
 
-server.get('/index', function (req, res) {
+server.get(prefix + '/index', function (req, res) {
   res.send(data.index());
 });
 
-server.get('/info/:name', function (req, res) {
+server.get(prefix + '/info/:name', function (req, res) {
   var name = req.params.name;  
   var meta = data.packageMeta(name);
   if (!meta) return res.send(404);
@@ -147,10 +174,10 @@ server.get('/info/:name', function (req, res) {
 // ----------------------------------------------------------------------------
 
 
-server.get('/-/all/since', listAction);
-server.get('/-/all', listAction);
+server.get(prefix + '/-/all/since', listAction);
+server.get(prefix + '/-/all', listAction);
 
-server.put('/:name', function (req, res) {
+server.put(prefix + '/:name', function (req, res) {
   // TODO verify that req.params.name is the same as req.body.name
   data.updatePackageMetadata(req.body);
   res.json(200, { ok: true });
@@ -160,7 +187,7 @@ function notFound(res) {
   return res.json(404, { error: "not_found", reason: "document not found" });
 }
 
-server.get('/:name', function (req, res) {
+server.get(prefix + '/:name', function (req, res) {
   var packageName = req.params.name;
   var meta = data.packageMeta(packageName);
   if (!meta) return notFound(res);
@@ -190,7 +217,7 @@ server.get('/:name', function (req, res) {
   res.json(200, result);
 });
 
-server.get('/:name/:version', function (req, res) {
+server.get(prefix + '/:name/:version', function (req, res) {
   var name = req.params.name;
   var version = req.params.version;
 
@@ -242,7 +269,7 @@ function listAction(req, res) {
   }
 }
 
-server.put('/:name/-/:filename/-rev/:rev', function (req, res) {
+server.put(prefix + '/:name/-/:filename/-rev/:rev', function (req, res) {
   var filename = req.params.filename;
   var rand = Math.floor(Math.random()*4294967296).toString(36);
   var tempPackageFile = path.join(argv.data, "temp", rand + '-' + filename);
@@ -266,7 +293,7 @@ server.put('/:name/-/:filename/-rev/:rev', function (req, res) {
   });
 });
 
-server.put('/:name/:version/-tag/:tag', function(req, res) {
+server.put(prefix + '/:name/:version/-tag/:tag', function(req, res) {
   res.json(201, {
     ok: true,
     id: req.params.tag,
@@ -274,7 +301,7 @@ server.put('/:name/:version/-tag/:tag', function(req, res) {
   });
 });
 
-server.get('/:name/-/:file', function(req, res) {
+server.get(prefix + '/:name/-/:file', function(req, res) {
   res.writeHead(200, { 'Content-Type': 'application/octet-stream'});
   fs.createReadStream(path.join(data._packagesDir, req.params.file))
     .pipe(res);
@@ -288,7 +315,7 @@ function fix(path) {
   };
 }
 
-server.put(fix('/-/user/:user'), function(req, res) {
+server.put(fix(prefix + '/-/user/:user'), function(req, res) {
   res.json(201, {
     ok: true,
     id: req.params.user,
@@ -296,7 +323,7 @@ server.put(fix('/-/user/:user'), function(req, res) {
   });
 });
 
-server.post('/_session', function(req, res) {
+server.post(prefix + '/_session', function(req, res) {
   // TODO - verify login & password
 
   var cookies = new Cookies(req, res);
@@ -345,7 +372,7 @@ ops.forEach(function (op1) {
 function registerOp (op1, op2) {
   if (!op2) {
     //console.log('/package/:name/' + op1[0] + '/:v1')
-    server.get('/package/:name/' + op1[0] + '/:v1', function (req, res, next) {
+    server.get(prefix + '/package/:name/' + op1[0] + '/:v1', function (req, res, next) {
       var name = req.params.name;
       var v1 = req.params.v1;
       var range = op1[1] + v1;
@@ -354,7 +381,7 @@ function registerOp (op1, op2) {
   }
   else {
     //console.log('/package/:name/' + op1[0] + '/:v1/' + op2[0] + '/:v2')
-    server.get('/package/:name/' + op1[0] + '/:v1/' + op2[0] + '/:v2', function (req, res, next) {
+    server.get(prefix + '/package/:name/' + op1[0] + '/:v1/' + op2[0] + '/:v2', function (req, res, next) {
       var name = req.params.name;
       var v1 = req.params.v1;
       var v2 = req.params.v2;
