@@ -9,7 +9,8 @@ var restify = require('restify')
   , rimraf = require('rimraf')
   , mkdirp = require('mkdirp')
   , semver = require('semver')
-  , optimist = require('optimist');
+  , optimist = require('optimist')
+  , request = require('request');
 
 // ----------------------------------------------------------------------------
 // options parsing
@@ -63,6 +64,13 @@ if (argv.c) {
   key = fs.readFileSync(argv.k);
   cert = fs.readFileSync(argv.c);
 }
+
+// ----------------------------------------------------------------------------
+// proxy server
+// ----------------------------------------------------------------------------
+
+var proxy = "https://registry.npmjs.org";
+
 
 // ----------------------------------------------------------------------------
 // data initialization
@@ -183,6 +191,20 @@ server.put(prefix + '/:name', function (req, res) {
   res.json(200, { ok: true });
 });
 
+function getProxy(req, res) {
+  var url = proxy + '/' + req.params.name, x;
+  if (x = req.params.version) url += '/' + x;
+
+  request.get(url, function (err, resp, body) {
+    try {
+      if (err) throw err;
+      res.json(JSON.parse(body));
+    } catch (err) {
+      res.json(500, { error: err })
+    }
+  });
+}
+
 function notFound(res) {
   return res.json(404, { error: "not_found", reason: "document not found" });
 }
@@ -190,7 +212,7 @@ function notFound(res) {
 server.get(prefix + '/:name', function (req, res) {
   var packageName = req.params.name;
   var meta = data.packageMeta(packageName);
-  if (!meta) return notFound(res);
+  if (!meta) return getProxy(req, res);
 
   var versions =  data.whichVersions(packageName).sort();
   var versionsData = {};
@@ -222,7 +244,7 @@ server.get(prefix + '/:name/:version', function (req, res) {
   var version = req.params.version;
 
   var meta = data.packageMeta(name);
-  if (!meta) return notFound(res);
+  if (!meta) return getProxy(req, res);
 
   var versionMeta = meta.versions[version];
   if (!versionMeta) return notFound(res);
