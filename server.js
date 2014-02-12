@@ -20,6 +20,7 @@ var restify = require('restify')
 var defaults = {
     d : path.join(process.cwd(), 'data'),
     p : 8080,
+    H: '0.0.0.0',
     h: '0.0.0.0',
     s: ''
   },
@@ -29,18 +30,20 @@ var defaults = {
     .default(defaults)
     .alias('d', 'data')
     .alias('p', 'port')
-    .alias('h', 'host')
+    .alias('H', 'listen')
     .alias('u', 'url')
     .alias('c', 'cert')
     .alias('k', 'key')
     .alias('s', 'security')
+    .alias('h', 'host')
     .describe('d', 'Directory to store Reggie\'s data')
     .describe('p', 'Reggie\'s a good listener. What port should I listen on?')
-    .describe('h', 'Which host should Reggie listen on?')
+    .describe('H', 'Which host should Reggie listen on?')
     .describe('u', 'URL where `npm` can access registry (usually http://{hostname}:{port}/)')
     .describe('s', 'What (long) prefix should be in the first part of the path (for security)?')
     .describe('c', 'Path to the SSL certificate')
     .describe('k', 'Path to the SSL key')
+    .describe('h', 'Host clients should address when communicating with this server')
     .argv;
 
 if (argv.help) {
@@ -369,7 +372,7 @@ server.pre(function (req, res, next) {
 });
 /**/
 
-server.listen(argv.port, argv.host, function() {
+server.listen(argv.port, argv.listen, function() {
   console.log('Reggie listening at %s', server.url);
   console.log('NPM registry URL:\n  %s\n', config.registryUrl);
 });
