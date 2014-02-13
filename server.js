@@ -249,6 +249,9 @@ server.get(prefix + '/:name/:version', function (req, res) {
   var meta = data.packageMeta(name);
   if (!meta) return getProxy(req, res);
 
+  if (version === 'latest') version = 'x.x.x';
+  version = semver.maxSatisfying(data.whichVersions(name), version);
+
   var versionMeta = meta.versions[version];
   if (!versionMeta) return notFound(res);
 
